@@ -1,110 +1,82 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import os
 
-# --- CONFIGURACIÓN DEL PORTAL ---
-st.set_page_config(
-    page_title="Auditoría de Procesos - Toyota Salta",
-    page_icon="🚗",
-    layout="wide"
-)
+# --- CONFIGURACIÓN ---
+st.set_page_config(page_title="Auditoría Toyota Salta", layout="wide")
 
-# Reemplaza con los GIDs reales de tu Google Sheet (están al final de la URL de cada pestaña)
+OBJETIVO = 0.90  # 90% definido por el usuario
 SHEET_ID = "16kPaOjXPXSzZFzIgVnbBfRjDh6j7SCVO"
+# Asegúrate de poner los GIDs reales aquí:
 GIDS = {
-    "Citas Presencial": "1444184392",
-    "Citas Call": "REEMPLAZAR_GID_CALL",
-    "Servicio": "REEMPLAZAR_GID_SERVICIO",
-    "Ordenes": "REEMPLAZAR_GID_ORDENES"
+    "Servicio": "REEMPLAZAR_POR_ID_PESTAÑA_SERVICIO",
+    "Presencial": "1444184392"
 }
 
 def load_data(gid):
     url = f"https://docs.google.com/spreadsheets/d/{SHEET_ID}/export?format=csv&gid={gid}"
-    try:
-        return pd.read_csv(url)
-    except:
-        return pd.DataFrame()
-
-# --- INTERFAZ DE USUARIO ---
-st.title("📊 Portal de Auditoría de Procesos Internos")
-st.markdown("### Sucursal Salta - Análisis de Desvíos y Desempeño")
-
-# Sidebar para selección global
-st.sidebar.header("Opciones de Visualización")
-mes_analisis = st.sidebar.selectbox("Mes de Auditoría", ["Marzo 2026"])
+    return pd.read_csv(url)
 
 # --- CARGA DE DATOS ---
-df_presencial = load_data(GIDS["Citas Presencial"])
-df_call = load_data(GIDS["Citas Call"])
-df_servicio = load_data(GIDS["Servicio"])
-df_ordenes = load_data(GIDS["Ordenes"])
+df_serv = load_data(GIDS["Servicio"])
 
-# --- SECCIÓN 1: ANÁLISIS DE DESVÍOS CRÍTICOS ---
-st.header("⚠️ Informe de Desvíos")
+st.title("🚗 Control de Desvíos - Asesores de Servicio")
 
-col1, col2, col3 = st.columns(3)
+if not df_serv.empty:
+    # 1. Dashboard por Asesor
+    st.header("📈 Desempeño Individual por Asesor")
+    
+    # Asumimos que las columnas se llaman 'Asesor', 'Punto de Control' y 'Resultado' (1 o 0)
+    lista_asesores = df_serv['Asesor'].unique()
+    
+    for asesor in lista_asesores:
+        with st.expander(f"Análisis detallado: {asesor}"):
+            df_ase = df_serv[df_serv['Asesor'] == asesor]
+            cumplimiento = df_ase['Resultado'].mean()
+            desvio_val = cumplimiento - OBJETIVO
+            
+            c1, c2 = st.columns([1, 2])
+            
+            with c1:
+                st.metric("Cumplimiento", f"{cumplimiento*100:.2f}%", 
+                          f"{desvio_val*100:.2f}% vs Objetivo", 
+                          delta_color="normal" if cumplimiento >= OBJETIVO else "inverse")
+                
+                # Desvíos más frecuentes del asesor
+                st.write("**Fallas más frecuentes:**")
+                fallas = df_ase[df_ase['Resultado'] == 0]['Punto de Control'].value_counts()
+                if not fallas.empty:
+                    st.dataframe(fallas)
+                else:
+                    st.success("Sin desvíos registrados")
 
-# Ejemplo de cálculo basado en los datos de la sucursal
-with col1:
-    st.metric(label="Cumplimiento Asesores de Servicio", value="84.60%", delta="-5.54%", delta_color="inverse")
-    st.caption("Objetivo: 90.14%")
+            with c2:
+                # Gráfico de cumplimiento por punto de control
+                fig = px.bar(df_ase, x='Punto de Control', y='Resultado', 
+                             title=f"Checklist - {asesor}",
+                             color='Resultado', color_continuous_scale=['red', 'green'])
+                fig.add_hline(y=OBJETIVO, line_dash="dash", line_color="white", annotation_text="Objetivo 90%")
+                st.plotly_chart(fig, use_container_width=True)
 
-with col2:
-    # Simulación de cálculo de desvío en Órdenes (puedes vincularlo a tu DF)
-    st.metric(label="Cumplimiento Citas Call", value="92.10%", delta="1.5%")
-
-with col3:
-    st.metric(label="Desvío General de Sucursal", value="91.84%", delta="-3.23%", delta_color="inverse")
-
-st.divider()
-
-# --- SECCIÓN 2: DESVÍOS FRECUENTES (ASESORES DE SERVICIO) ---
-st.subheader("🚩 Principales Fallas en Asesores de Servicio")
-
-if not df_servicio.empty:
-    # Buscamos filas donde el puntaje sea 0 o el cumplimiento sea "No"
-    # Ajusta 'Resultado' y 'Puntos de Control' según los nombres exactos de tus columnas
-    try:
-        desvios_frecuentes = df_servicio[df_servicio['Resultado'] == 0].groupby('Punto de Control').size().reset_index(name='Frecuencia')
-        desvios_frecuentes = desvios_frecuentes.sort_values(by='Frecuencia', ascending=False)
-
-        fig = px.bar(desvios_frecuentes.head(5), x='Frecuencia', y='Punto de Control', 
-                     orientation='h', title="Top 5 Incumplimientos más Frecuentes",
-                     color_discrete_sequence=['#EB0A1E']) # Rojo Toyota
-        st.plotly_chart(fig, use_container_width=True)
-    except:
-        st.info("Asegúrate de que la hoja de 'Servicio' tenga las columnas 'Punto de Control' y 'Resultado' para ver el análisis de fallas.")
-else:
-    st.warning("No se pudo cargar la hoja de Servicio. Verifica el GID.")
-
-# --- SECCIÓN 3: TABLEROS DETALLADOS ---
-st.header("📋 Detalle por Área de Auditoría")
-
-tab1, tab2, tab3, tab4 = st.tabs(["Citas Presencial", "Citas Call", "Servicio", "Órdenes de Reparación"])
-
-with tab1:
-    st.subheader("Auditoría: Citas Presenciales")
-    st.dataframe(df_presencial, use_container_width=True)
-
-with tab2:
-    st.subheader("Auditoría: Citas Call Center")
-    st.dataframe(df_call, use_container_width=True)
-
-with tab3:
-    st.subheader("Auditoría: Gestión de Servicio")
-    if not df_servicio.empty:
-        # Filtro por asesor si la columna existe
-        if 'Asesor' in df_servicio.columns:
-            asesor = st.selectbox("Filtrar por Asesor de Servicio", df_servicio['Asesor'].unique())
-            st.write(df_servicio[df_servicio['Asesor'] == asesor])
+    # 2. Galería de Evidencias (Fotos de Desvíos)
+    st.divider()
+    st.header("📸 Galería de Evidencias de Desvíos")
+    st.info("Las imágenes se cargan desde la carpeta 'fotos_desvios' en el repositorio.")
+    
+    ruta_fotos = "fotos_desvios"
+    
+    if os.path.exists(ruta_fotos):
+        archivos = [f for f in os.listdir(ruta_fotos) if f.endswith(('.png', '.jpg', '.jpeg'))]
+        if archivos:
+            cols = st.columns(3) # Galería de 3 columnas
+            for i, img_name in enumerate(archivos):
+                with cols[i % 3]:
+                    st.image(os.path.join(ruta_fotos, img_name), caption=f"Evidencia: {img_name}")
         else:
-            st.dataframe(df_servicio, use_container_width=True)
+            st.warning("No hay fotos en la carpeta 'fotos_desvios'.")
+    else:
+        st.error("No se encontró la carpeta 'fotos_desvios'. Créala en tu repositorio de GitHub.")
 
-with tab4:
-    st.subheader("Auditoría: Órdenes (OR)")
-    st.dataframe(df_ordenes, use_container_width=True)
-
-# --- BOTÓN DE DESCARGA ---
-st.sidebar.divider()
-if st.sidebar.button("Generar Reporte de Desvíos"):
-    st.sidebar.success("Reporte generado correctamente para Salta.")
+else:
+    st.error("Error al cargar la hoja de Servicio. Verifica el GID y los permisos del Google Sheet.")
